@@ -13,7 +13,6 @@ use crate::{
         ChunkItem, ChunkType, ChunkableModule, EvaluatableAssets,
         availability_info::AvailabilityInfo, chunk_id_strategy::ModuleIdStrategy,
     },
-    context::AssetContext,
     environment::Environment,
     ident::AssetIdent,
     module::Module,
@@ -447,7 +446,6 @@ pub trait ChunkingContext {
     fn debug_ids_enabled(self: Vc<Self>) -> Vc<bool>;
 
     /// Returns the list of global variable names to forward to workers.
-    /// Note: CHUNK_SUFFIX is handled specially (not via globalThis), so it's not in this list.
     #[turbo_tasks::function]
     fn worker_forwarded_globals(self: Vc<Self>) -> Vc<Vec<RcStr>> {
         Vc::cell(vec![])
@@ -456,11 +454,7 @@ pub trait ChunkingContext {
     /// Returns the worker entrypoint for this chunking context.
     /// The asset_context should come from the origin where the worker was created.
     #[turbo_tasks::function]
-    async fn worker_entrypoint(
-        self: Vc<Self>,
-        asset_context: Vc<Box<dyn AssetContext>>,
-    ) -> Result<Vc<Box<dyn OutputAsset>>> {
-        let _ = asset_context;
+    async fn worker_entrypoint(self: Vc<Self>) -> Result<Vc<Box<dyn OutputAsset>>> {
         bail!(
             "Worker entrypoint is not supported by {name}",
             name = self.name().await?

@@ -18,7 +18,6 @@ use turbopack_core::{
         chunk_group::{MakeChunkGroupResult, make_chunk_group},
         chunk_id_strategy::ModuleIdStrategy,
     },
-    context::AssetContext,
     environment::Environment,
     ident::AssetIdent,
     module::Module,
@@ -222,7 +221,9 @@ impl BrowserChunkingContextBuilder {
     }
 
     pub fn worker_forwarded_globals(mut self, globals: Vec<RcStr>) -> Self {
-        self.chunking_context.worker_forwarded_globals = globals;
+        self.chunking_context
+            .worker_forwarded_globals
+            .extend(globals);
         self
     }
 
@@ -359,7 +360,7 @@ impl BrowserChunkingContext {
                 unused_references: None,
                 chunking_configs: Default::default(),
                 should_use_absolute_url_references: false,
-                worker_forwarded_globals: Default::default(),
+                worker_forwarded_globals: vec![],
             },
         }
     }
@@ -914,10 +915,7 @@ impl ChunkingContext for BrowserChunkingContext {
     }
 
     #[turbo_tasks::function]
-    async fn worker_entrypoint(
-        self: Vc<Self>,
-        _asset_context: Vc<Box<dyn AssetContext>>,
-    ) -> Result<Vc<Box<dyn OutputAsset>>> {
+    async fn worker_entrypoint(self: Vc<Self>) -> Result<Vc<Box<dyn OutputAsset>>> {
         let chunking_context: Vc<Box<dyn ChunkingContext>> = Vc::upcast(self);
         let resolved = chunking_context.to_resolved().await?;
         let forwarded_globals = chunking_context.worker_forwarded_globals();

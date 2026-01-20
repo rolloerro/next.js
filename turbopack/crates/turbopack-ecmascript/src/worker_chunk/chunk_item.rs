@@ -64,12 +64,7 @@ impl EcmascriptChunkItem for WorkerLoaderChunkItem {
         let this = self.await?;
 
         // Get the worker entrypoint for this chunking context
-        let asset_context = *this.asset_context;
-        let entrypoint_full_path = this
-            .chunking_context
-            .worker_entrypoint(asset_context)
-            .path()
-            .await?;
+        let entrypoint_full_path = this.chunking_context.worker_entrypoint().path().await?;
 
         // Get the entrypoint path relative to output root
         let output_root = this.chunking_context.output_root().owned().await?;
@@ -89,18 +84,17 @@ impl EcmascriptChunkItem for WorkerLoaderChunkItem {
         // Determine if this is a SharedWorker
         let is_shared = matches!(this.worker_type, WorkerReferenceSubType::SharedWorker);
 
-        // Get the list of globals to forward to the worker
         let forwarded_globals = this.chunking_context.worker_forwarded_globals().await?;
 
         // Generate code that creates a worker URL with the entrypoint and chunk paths
         let code = formatdoc! {
             r#"
-                {TURBOPACK_EXPORT_VALUE}({TURBOPACK_WORKER_URL}({entrypoint}, {chunks}, {shared}, {forwarded_globals}));
+                {TURBOPACK_EXPORT_VALUE}({TURBOPACK_WORKER_URL}({entrypoint}, {chunks}, {shared}, [{forwarded_globals}]));
             "#,
             entrypoint = StringifyJs(&entrypoint_path),
             chunks = StringifyJs(&chunks_data),
             shared = is_shared,
-            forwarded_globals = StringifyJs(&*forwarded_globals),
+            forwarded_globals = StringifyJs(&forwarded_globals),
         };
 
         Ok(EcmascriptChunkItemContent {
@@ -116,10 +110,9 @@ impl OutputAssetsReference for WorkerLoaderChunkItem {
     #[turbo_tasks::function]
     async fn references(self: Vc<Self>) -> Result<Vc<OutputAssetsWithReferenced>> {
         let this = self.await?;
-        let asset_context = *this.asset_context;
         Ok(self
             .chunk_group()
-            .concatenate_asset(this.chunking_context.worker_entrypoint(asset_context)))
+            .concatenate_asset(this.chunking_context.worker_entrypoint()))
     }
 }
 
