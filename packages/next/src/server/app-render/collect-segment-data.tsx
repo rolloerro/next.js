@@ -35,6 +35,7 @@ import { workAsyncStorage } from './work-async-storage.external'
 // Contains metadata about the route tree. The client must fetch this before
 // it can fetch any actual segment data.
 export type RootTreePrefetch = {
+  buildId?: string
   tree: TreePrefetch
   staleTime: number
 }
@@ -76,6 +77,7 @@ export type TreePrefetch = {
 }
 
 export type SegmentPrefetch = {
+  buildId?: string
   rsc: React.ReactNode | null
   isPartial: boolean
 }
@@ -217,6 +219,8 @@ async function PrefetchTreeData({
     }
   )
 
+  const buildId = initialRSCPayload.b
+
   // FlightDataPath is an unsound type, hence the additional checks.
   const flightDataPaths = initialRSCPayload.f
   if (flightDataPaths.length !== 1 && flightDataPaths[0].length !== 3) {
@@ -236,6 +240,7 @@ async function PrefetchTreeData({
   const tree = collectSegmentDataImpl(
     isClientParamParsingEnabled,
     flightRouterState,
+    buildId,
     seedData,
     clientModules,
     ROOT_SEGMENT_REQUEST_KEY,
@@ -248,7 +253,7 @@ async function PrefetchTreeData({
   // the client cache.
   segmentTasks.push(
     waitAtLeastOneReactRenderTask().then(() =>
-      renderSegmentPrefetch(head, HEAD_REQUEST_KEY, clientModules)
+      renderSegmentPrefetch(buildId, head, HEAD_REQUEST_KEY, clientModules)
     )
   )
 
@@ -259,6 +264,7 @@ async function PrefetchTreeData({
 
   // Render the route tree to a special `/_tree` segment.
   const treePrefetch: RootTreePrefetch = {
+    buildId,
     tree,
     staleTime,
   }
@@ -268,6 +274,7 @@ async function PrefetchTreeData({
 function collectSegmentDataImpl(
   isClientParamParsingEnabled: boolean,
   route: FlightRouterState,
+  buildId: string | undefined,
   seedData: CacheNodeSeedData | null,
   clientModules: ManifestNode,
   requestKey: SegmentRequestKey,
@@ -293,6 +300,7 @@ function collectSegmentDataImpl(
     const childTree = collectSegmentDataImpl(
       isClientParamParsingEnabled,
       childRoute,
+      buildId,
       childSeedData,
       clientModules,
       childRequestKey,
@@ -312,7 +320,7 @@ function collectSegmentDataImpl(
       // Since we're already in the middle of a render, wait until after the
       // current task to escape the current rendering context.
       waitAtLeastOneReactRenderTask().then(() =>
-        renderSegmentPrefetch(seedData[0], requestKey, clientModules)
+        renderSegmentPrefetch(buildId, seedData[0], requestKey, clientModules)
       )
     )
   } else {
@@ -352,6 +360,7 @@ function collectSegmentDataImpl(
 }
 
 async function renderSegmentPrefetch(
+  buildId: string | undefined,
   rsc: React.ReactNode,
   requestKey: SegmentRequestKey,
   clientModules: ManifestNode
@@ -360,6 +369,7 @@ async function renderSegmentPrefetch(
   // In the future, this is where we can include additional metadata, like the
   // stale time and cache tags.
   const segmentPrefetch: SegmentPrefetch = {
+    buildId,
     rsc,
     isPartial: await isPartialRSCData(rsc, clientModules),
   }

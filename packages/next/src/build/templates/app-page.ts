@@ -1140,7 +1140,7 @@ export async function handler(
         if (process.env.NEXT_DEPLOYMENT_ID) {
           id = process.env.NEXT_DEPLOYMENT_ID
         } else {
-          id = process.env.__NEXT_BUILD_ID!
+          id = buildId
         }
         res.setHeader(NEXT_BUILD_ID_HEADER, id)
       }

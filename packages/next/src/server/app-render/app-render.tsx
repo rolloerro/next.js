@@ -265,6 +265,22 @@ export type AppRenderContext = {
   implicitTags: ImplicitTags
 }
 
+function maybeAppendBuildIdToRSCPayload<T extends RSCPayload>(
+  ctx: AppRenderContext,
+  payload: T
+): T {
+  if (ctx.renderOpts.nextExport) {
+    // output: export, Next.js doesn't control the headers
+    return {
+      ...payload,
+      b: ctx.sharedContext.buildId,
+    }
+  } else {
+    // We rely on a response header
+    return payload
+  }
+}
+
 interface ParseRequestHeadersOptions {
   readonly isRoutePPREnabled: boolean
   readonly previewModeId: string | undefined
@@ -543,21 +559,21 @@ async function generateDynamicRSCPayload(
   // We can rely on this because `ActionResult` will always be a promise, even if
   // the result is falsey.
   if (options?.actionResult) {
-    return {
+    return maybeAppendBuildIdToRSCPayload(ctx, {
       a: options.actionResult,
       f: flightData,
       q: getRenderedSearch(query),
       i: !!couldBeIntercepted,
-    }
+    })
   }
 
   // Otherwise, it's a regular RSC response.
-  const baseResponse = {
+  const baseResponse = maybeAppendBuildIdToRSCPayload(ctx, {
     f: flightData,
     q: getRenderedSearch(query),
     i: !!couldBeIntercepted,
     S: workStore.isStaticGeneration,
-  }
+  })
 
   // For runtime prefetches, we encode the stale time and isPartial flag in the response body
   // rather than relying on response headers. Both of these values will be transformed
@@ -1526,7 +1542,7 @@ async function getRSCPayload(
     workStore.isStaticGeneration &&
     ctx.renderOpts.experimental.isRoutePPREnabled === true
 
-  return {
+  return maybeAppendBuildIdToRSCPayload(ctx, {
     // See the comment above the `Preloads` component (below) for why this is part of the payload
     P: createElement(Preloads, {
       preloadCallbacks: preloadCallbacks,
@@ -1545,7 +1561,7 @@ async function getRSCPayload(
     m: missingSlots,
     G: [GlobalError, globalErrorStyles],
     S: workStore.isStaticGeneration,
-  }
+  })
 }
 
 /**
@@ -1653,7 +1669,7 @@ async function getErrorRSCPayload(
     workStore.isStaticGeneration &&
     ctx.renderOpts.experimental.isRoutePPREnabled === true
 
-  return {
+  return maybeAppendBuildIdToRSCPayload(ctx, {
     c: prepareInitialCanonicalUrl(url),
     q: getRenderedSearch(query),
     m: undefined,
@@ -1668,7 +1684,7 @@ async function getErrorRSCPayload(
     ],
     G: [GlobalError, globalErrorStyles],
     S: workStore.isStaticGeneration,
-  } satisfies InitialRSCPayload
+  } satisfies InitialRSCPayload)
 }
 
 // This component must run in an SSR context. It will render the RSC root component

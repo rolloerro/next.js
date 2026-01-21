@@ -95,7 +95,7 @@ import { PAGE_SEGMENT_KEY } from '../../../shared/lib/segment'
 import { FetchStrategy } from './types'
 import { createPromiseWithResolvers } from '../../../shared/lib/promise-with-resolvers'
 import { readFromBFCacheDuringRegularNavigation } from './bfcache'
-import { getDeploymentId } from '../../../shared/lib/deployment-id'
+import { getAppBuildId } from '../../app-build-id'
 
 /**
  * Ensures a minimum stale time of 30s to avoid issues where the server sends a too
@@ -1538,15 +1538,6 @@ export async function fetchRouteOnCacheMiss(
       isOutputExportMode
 
     if (routeIsPPREnabled) {
-      let resDeploymentId = response.headers.get(NEXT_BUILD_ID_HEADER)
-      if (resDeploymentId != null && resDeploymentId !== getDeploymentId()) {
-        // The server build does not match the client. Treat as a 404. During
-        // an actual navigation, the router will trigger an MPA navigation.
-        // TODO: We should cache the fact that this is an MPA navigation.
-        rejectRouteCacheEntry(entry, Date.now() + 10 * 1000)
-        return null
-      }
-
       const prefetchStream = createPrefetchResponseStream(
         response.body,
         closed.resolve,
@@ -1558,6 +1549,17 @@ export async function fetchRouteOnCacheMiss(
         prefetchStream,
         headers
       )
+
+      if (
+        (response.headers.get(NEXT_BUILD_ID_HEADER) ?? serverData.buildId) !==
+        getAppBuildId()
+      ) {
+        // The server build does not match the client. Treat as a 404. During
+        // an actual navigation, the router will trigger an MPA navigation.
+        // TODO: We should cache the fact that this is an MPA navigation.
+        rejectRouteCacheEntry(entry, Date.now() + 10 * 1000)
+        return null
+      }
 
       // Get the params that were used to render the target page. These may
       // be different from the params in the request URL, if the page
@@ -1595,15 +1597,6 @@ export async function fetchRouteOnCacheMiss(
         routeIsPPREnabled
       )
     } else {
-      let resDeploymentId = response.headers.get(NEXT_BUILD_ID_HEADER)
-      if (resDeploymentId != null && resDeploymentId !== getDeploymentId()) {
-        // The server build does not match the client. Treat as a 404. During
-        // an actual navigation, the router will trigger an MPA navigation.
-        // TODO: We should cache the fact that this is an MPA navigation.
-        rejectRouteCacheEntry(entry, Date.now() + 10 * 1000)
-        return null
-      }
-
       // PPR is not enabled for this route. The server responds with a
       // different format (FlightRouterState) that we need to convert.
       // TODO: We will unify the responses eventually. I'm keeping the types
@@ -1621,6 +1614,17 @@ export async function fetchRouteOnCacheMiss(
           prefetchStream,
           headers
         )
+
+      if (
+        (response.headers.get(NEXT_BUILD_ID_HEADER) ?? serverData.b) !==
+        getAppBuildId()
+      ) {
+        // The server build does not match the client. Treat as a 404. During
+        // an actual navigation, the router will trigger an MPA navigation.
+        // TODO: We should cache the fact that this is an MPA navigation.
+        rejectRouteCacheEntry(entry, Date.now() + 10 * 1000)
+        return null
+      }
 
       writeDynamicTreeResponseIntoCache(
         Date.now(),
@@ -1739,14 +1743,6 @@ export async function fetchSegmentOnCacheMiss(
       return null
     }
 
-    let resDeploymentId = response.headers.get(NEXT_BUILD_ID_HEADER)
-    if (resDeploymentId != null && resDeploymentId !== getDeploymentId()) {
-      // The server build does not match the client. Treat as a 404. During
-      // an actual navigation, the router will trigger an MPA navigation.
-      rejectSegmentCacheEntry(segmentCacheEntry, Date.now() + 10 * 1000)
-      return null
-    }
-
     // Track when the network connection closes.
     const closed = createPromiseWithResolvers<void>()
 
@@ -1763,6 +1759,15 @@ export async function fetchSegmentOnCacheMiss(
       prefetchStream,
       headers
     )
+    if (
+      (response.headers.get(NEXT_BUILD_ID_HEADER) ?? serverData.buildId) !==
+      getAppBuildId()
+    ) {
+      // The server build does not match the client. Treat as a 404. During
+      // an actual navigation, the router will trigger an MPA navigation.
+      rejectSegmentCacheEntry(segmentCacheEntry, Date.now() + 10 * 1000)
+      return null
+    }
     return {
       value: fulfillSegmentCacheEntry(
         segmentCacheEntry,
@@ -2046,8 +2051,10 @@ function writeDynamicRenderResponseIntoCache(
   route: FulfilledRouteCacheEntry,
   spawnedEntries: Map<SegmentRequestKey, PendingSegmentCacheEntry> | null
 ): Array<FulfilledSegmentCacheEntry> | null {
-  let resDeploymentId = response.headers.get(NEXT_BUILD_ID_HEADER)
-  if (resDeploymentId != null && resDeploymentId !== getDeploymentId()) {
+  if (
+    (response.headers.get(NEXT_BUILD_ID_HEADER) ?? serverData.b) !==
+    getAppBuildId()
+  ) {
     // The server build does not match the client. Treat as a 404. During
     // an actual navigation, the router will trigger an MPA navigation.
     if (spawnedEntries !== null) {

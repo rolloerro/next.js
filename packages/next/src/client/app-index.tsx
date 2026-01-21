@@ -25,6 +25,8 @@ import { createInitialRouterState } from './components/router-reducer/create-ini
 import { MissingSlotContext } from '../shared/lib/app-router-context.shared-runtime'
 import type { StaticIndicatorState } from './dev/hot-reloader/app/hot-reloader-app'
 import { createInitialRSCPayloadFromFallbackPrerender } from './flight-data-helpers'
+import { getDeploymentId } from '../shared/lib/deployment-id'
+import { setAppBuildId } from './app-build-id'
 
 /// <reference types="react-dom/experimental" />
 
@@ -306,6 +308,15 @@ export async function hydrate(
     webSocket = createWebSocket(assetPrefix, staticIndicatorState)
   }
   const initialRSCPayload = await initialServerResponse
+
+  let deploymentId = getDeploymentId()
+  // setAppBuildId should be called only once, during JS initialization
+  // and before any components have hydrated.
+  if (deploymentId) {
+    setAppBuildId(deploymentId)
+  } else {
+    setAppBuildId(initialRSCPayload.b!)
+  }
 
   const initialTimestamp = Date.now()
   const actionQueue: AppRouterActionQueue = createMutableActionQueue(

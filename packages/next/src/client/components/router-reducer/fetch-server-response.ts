@@ -38,6 +38,7 @@ import { setCacheBustingSearchParam } from './set-cache-busting-search-param'
 import { urlToUrlWithoutFlightMarker } from '../../route-params'
 import type { NormalizedSearch } from '../segment-cache/cache-key'
 import { getDeploymentId } from '../../../shared/lib/deployment-id'
+import { getAppBuildId } from '../../app-build-id'
 
 const createFromReadableStream =
   createFromReadableStreamBrowser as (typeof import('react-server-dom-webpack/client.browser'))['createFromReadableStream']
@@ -209,12 +210,6 @@ export async function fetchServerResponse(
       return doMpaNavigation(responseUrl.toString())
     }
 
-    let resDeploymentId = res.headers.get(NEXT_BUILD_ID_HEADER)
-    if (resDeploymentId != null && resDeploymentId !== getDeploymentId()) {
-      // The server build does not match the client build.
-      return doMpaNavigation(res.url)
-    }
-
     // We may navigate to a page that requires a different Webpack runtime.
     // In prod, every page will have the same Webpack runtime.
     // In dev, the Webpack runtime is minimal for each page.
@@ -246,6 +241,14 @@ export async function fetchServerResponse(
     }
 
     const flightResponse = await flightResponsePromise
+
+    if (
+      (res.headers.get(NEXT_BUILD_ID_HEADER) ?? flightResponse.b) !==
+      getAppBuildId()
+    ) {
+      // The server build does not match the client build.
+      return doMpaNavigation(res.url)
+    }
 
     const normalizedFlightData = normalizeFlightData(flightResponse.f)
     if (typeof normalizedFlightData === 'string') {
