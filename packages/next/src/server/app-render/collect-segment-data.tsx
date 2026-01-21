@@ -264,9 +264,11 @@ async function PrefetchTreeData({
 
   // Render the route tree to a special `/_tree` segment.
   const treePrefetch: RootTreePrefetch = {
-    buildId,
     tree,
     staleTime,
+  }
+  if (buildId) {
+    treePrefetch.buildId = buildId
   }
   return treePrefetch
 }
@@ -369,9 +371,11 @@ async function renderSegmentPrefetch(
   // In the future, this is where we can include additional metadata, like the
   // stale time and cache tags.
   const segmentPrefetch: SegmentPrefetch = {
-    buildId,
     rsc,
     isPartial: await isPartialRSCData(rsc, clientModules),
+  }
+  if (buildId) {
+    segmentPrefetch.buildId = buildId
   }
   // Since all we're doing is decoding and re-encoding a cached prerender, if
   // it takes longer than a microtask, it must because of hanging promises

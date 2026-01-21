@@ -1134,15 +1134,10 @@ export async function handler(
 
       const didPostpone = typeof cacheEntry.value.postponed === 'string'
 
-      // TODO when exactly should this happen?
-      if (!routeModule.isDev && isRSCRequest) {
-        let id
-        if (process.env.NEXT_DEPLOYMENT_ID) {
-          id = process.env.NEXT_DEPLOYMENT_ID
-        } else {
-          id = buildId
-        }
-        res.setHeader(NEXT_BUILD_ID_HEADER, id)
+      // TODO when/where exactly should this happen?
+      if (isRSCRequest && deploymentId) {
+        // This has to correspond with the logic in maybeAppendBuildIdToRSCPayload in app-render.tsx
+        res.setHeader(NEXT_BUILD_ID_HEADER, deploymentId)
       }
 
       if (

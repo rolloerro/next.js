@@ -269,8 +269,9 @@ function maybeAppendBuildIdToRSCPayload<T extends RSCPayload>(
   ctx: AppRenderContext,
   payload: T
 ): T {
-  if (ctx.renderOpts.nextExport) {
+  if (ctx.renderOpts.nextExport || !ctx.renderOpts.deploymentId) {
     // output: export, Next.js doesn't control the headers
+    // for build id, we need to initialize the id on initial page load, so a header isn't enough
     return {
       ...payload,
       b: ctx.sharedContext.buildId,
