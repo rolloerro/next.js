@@ -100,7 +100,6 @@ export function createInitialRSCPayloadFromFallbackPrerender(
   const originalFlightDataPath = fallbackInitialRSCPayload.f[0]
   const originalFlightRouterState = originalFlightDataPath[0]
   return {
-    b: fallbackInitialRSCPayload.b,
     c: canonicalUrl.split('/'),
     q: renderedSearch,
     i: fallbackInitialRSCPayload.i,

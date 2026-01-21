@@ -221,8 +221,6 @@ export type FlightData = Array<FlightDataPath> | string
 export type ActionResult = Promise<any>
 
 export type InitialRSCPayload = {
-  /** buildId */
-  b: string
   /** initialCanonicalUrlParts */
   c: string[]
   /** initialRenderedSearch */
@@ -241,8 +239,6 @@ export type InitialRSCPayload = {
 
 // Response from `createFromFetch` for normal rendering
 export type NavigationFlightResponse = {
-  /** buildId */
-  b: string
   /** flightData */
   f: FlightData
   /** prerendered */
@@ -259,8 +255,6 @@ export type NavigationFlightResponse = {
 export type ActionFlightResponse = {
   /** actionResult */
   a: ActionResult
-  /** buildId */
-  b: string
   /** flightData */
   f: FlightData
   /** renderedSearch */

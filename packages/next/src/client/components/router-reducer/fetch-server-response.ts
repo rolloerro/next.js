@@ -13,6 +13,7 @@ import type {
 } from '../../../shared/lib/app-router-types'
 
 import {
+  NEXT_BUILD_ID_HEADER,
   type NEXT_ROUTER_PREFETCH_HEADER,
   type NEXT_ROUTER_SEGMENT_PREFETCH_HEADER,
   NEXT_ROUTER_STATE_TREE_HEADER,
@@ -33,7 +34,6 @@ import {
   prepareFlightRouterStateForRequest,
   type NormalizedFlightData,
 } from '../../flight-data-helpers'
-import { getAppBuildId } from '../../app-build-id'
 import { setCacheBustingSearchParam } from './set-cache-busting-search-param'
 import { urlToUrlWithoutFlightMarker } from '../../route-params'
 import type { NormalizedSearch } from '../segment-cache/cache-key'
@@ -209,6 +209,12 @@ export async function fetchServerResponse(
       return doMpaNavigation(responseUrl.toString())
     }
 
+    let resDeploymentId = res.headers.get(NEXT_BUILD_ID_HEADER)
+    if (resDeploymentId != null && resDeploymentId !== getDeploymentId()) {
+      // The server build does not match the client build.
+      return doMpaNavigation(res.url)
+    }
+
     // We may navigate to a page that requires a different Webpack runtime.
     // In prod, every page will have the same Webpack runtime.
     // In dev, the Webpack runtime is minimal for each page.
@@ -240,10 +246,6 @@ export async function fetchServerResponse(
     }
 
     const flightResponse = await flightResponsePromise
-
-    if (getAppBuildId() !== flightResponse.b) {
-      return doMpaNavigation(res.url)
-    }
 
     const normalizedFlightData = normalizeFlightData(flightResponse.f)
     if (typeof normalizedFlightData === 'string') {

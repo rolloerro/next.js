@@ -34,6 +34,8 @@ export const NEXT_IS_PRERENDER_HEADER = 'x-nextjs-prerender' as const
 export const NEXT_ACTION_NOT_FOUND_HEADER = 'x-nextjs-action-not-found' as const
 export const NEXT_REQUEST_ID_HEADER = 'x-nextjs-request-id' as const
 export const NEXT_HTML_REQUEST_ID_HEADER = 'x-nextjs-html-request-id' as const
+// If possible, this is just the deployment id, but as a fallback, it can indeed be the build id.
+export const NEXT_BUILD_ID_HEADER = 'x-nextjs-build-id' as const
 
 // TODO: Should this include nextjs in the name, like the others?
 export const NEXT_ACTION_REVALIDATED_HEADER = 'x-action-revalidated' as const

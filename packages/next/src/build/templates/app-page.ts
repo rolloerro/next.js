@@ -39,6 +39,7 @@ import {
   NEXT_IS_PRERENDER_HEADER,
   NEXT_DID_POSTPONE_HEADER,
   RSC_CONTENT_TYPE_HEADER,
+  NEXT_BUILD_ID_HEADER,
 } from '../../client/components/app-router-headers'
 import { getBotType, isBot } from '../../shared/lib/router/utils/is-bot'
 import {
@@ -1132,6 +1133,17 @@ export async function handler(
       }
 
       const didPostpone = typeof cacheEntry.value.postponed === 'string'
+
+      // TODO when exactly should this happen?
+      if (!routeModule.isDev && isRSCRequest) {
+        let id
+        if (process.env.NEXT_DEPLOYMENT_ID) {
+          id = process.env.NEXT_DEPLOYMENT_ID
+        } else {
+          id = process.env.__NEXT_BUILD_ID!
+        }
+        res.setHeader(NEXT_BUILD_ID_HEADER, id)
+      }
 
       if (
         isSSG &&

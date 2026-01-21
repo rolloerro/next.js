@@ -546,7 +546,6 @@ async function generateDynamicRSCPayload(
     return {
       a: options.actionResult,
       f: flightData,
-      b: ctx.sharedContext.buildId,
       q: getRenderedSearch(query),
       i: !!couldBeIntercepted,
     }
@@ -554,7 +553,6 @@ async function generateDynamicRSCPayload(
 
   // Otherwise, it's a regular RSC response.
   const baseResponse = {
-    b: ctx.sharedContext.buildId,
     f: flightData,
     q: getRenderedSearch(query),
     i: !!couldBeIntercepted,
@@ -1533,7 +1531,6 @@ async function getRSCPayload(
     P: createElement(Preloads, {
       preloadCallbacks: preloadCallbacks,
     }),
-    b: ctx.sharedContext.buildId,
     c: prepareInitialCanonicalUrl(url),
     q: getRenderedSearch(query),
     i: !!couldBeIntercepted,
@@ -1657,7 +1654,6 @@ async function getErrorRSCPayload(
     ctx.renderOpts.experimental.isRoutePPREnabled === true
 
   return {
-    b: ctx.sharedContext.buildId,
     c: prepareInitialCanonicalUrl(url),
     q: getRenderedSearch(query),
     m: undefined,
