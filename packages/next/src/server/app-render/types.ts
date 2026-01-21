@@ -122,6 +122,7 @@ export interface RenderOptsPartial {
     errorsRscStream: ReadableStream<Uint8Array>,
     htmlRequestId: string
   ) => void
+  /** This isn't only `output: export`, but also true for isBuildTimePrerendering */
   nextExport?: boolean
   nextConfigOutput?: 'standalone' | 'export'
   onInstrumentationRequestError?: ServerOnInstrumentationRequestError
