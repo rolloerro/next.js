@@ -910,8 +910,8 @@ impl ChunkingContext for BrowserChunkingContext {
     }
 
     #[turbo_tasks::function]
-    async fn worker_forwarded_globals(self: Vc<Self>) -> Result<Vc<Vec<RcStr>>> {
-        Ok(Vc::cell(self.await?.worker_forwarded_globals.clone()))
+    fn worker_forwarded_globals(&self) -> Vc<Vec<RcStr>> {
+        Vc::cell(self.worker_forwarded_globals.clone())
     }
 
     #[turbo_tasks::function]

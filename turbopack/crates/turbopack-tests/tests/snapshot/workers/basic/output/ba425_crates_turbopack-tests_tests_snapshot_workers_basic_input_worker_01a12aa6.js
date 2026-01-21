@@ -11,6 +11,7 @@ const CHUNK_BASE_PATH = "";
 const RELATIVE_ROOT_PATH = "../../../../../../..";
 const RUNTIME_PUBLIC_PATH = "";
 const CHUNK_SUFFIX = "";
+const WORKER_FORWARDED_GLOBALS = [];
 /**
  * This file contains runtime types and functions that are shared between all
  * TurboPack ECMAScript runtimes.
@@ -687,25 +688,22 @@ browserContextPrototype.P = resolveAbsolutePath;
  * The entrypoint is a pre-compiled worker runtime file. The params configure
  * which module chunks to load and which module to run as the entry point.
  *
- * The params are a JSON array where:
- * - Index 0: Array of chunk URLs to load via importScripts (-> TURBOPACK_NEXT_CHUNK_URLS)
- * - Index 1+: Values for forwarded globals (in order of `forwardedGlobals`)
+ * The params are a JSON array of the following structure:
+ * `[TURBOPACK_NEXT_CHUNK_URLS, CHUNK_SUFFIX, ...WORKER_FORWARDED_GLOBALS]`
  *
  * @param entrypoint URL path to the worker entrypoint chunk
  * @param moduleChunks list of module chunk paths to load
  * @param shared whether this is a SharedWorker (uses querystring for URL identity)
- */ function getWorkerURL(entrypoint, moduleChunks, shared, forwardedGlobals) {
-    const url = new URL(getChunkRelativeUrl(entrypoint), location.origin);
+ */ function getWorkerURL(entrypoint, moduleChunks, shared) {
     const chunkUrls = moduleChunks.map((chunk)=>getChunkRelativeUrl(chunk)).reverse();
-    // params[0] = chunk URLs, params[1] = CHUNK_SUFFIX, params[2+] = forwarded globals
     const params = [
         chunkUrls,
         CHUNK_SUFFIX
     ];
-    // Add forwarded global values in the same order as WORKER_FORWARDED_GLOBALS
-    for (const globalName of forwardedGlobals){
+    for (const globalName of WORKER_FORWARDED_GLOBALS){
         params.push(globalThis[globalName]);
     }
+    const url = new URL(getChunkRelativeUrl(entrypoint), location.origin);
     const paramsJson = JSON.stringify(params);
     if (shared) {
         url.searchParams.set('params', paramsJson);
@@ -1857,7 +1855,7 @@ let DEV_BACKEND;
     }
 })();
 function _eval({ code, url, map }) {
-    code += `\n\n//# sourceURL=${encodeURI(location.origin + CHUNK_BASE_PATH + url + TURBOPACK_CHUNK_SUFFIX)}`;
+    code += `\n\n//# sourceURL=${encodeURI(location.origin + CHUNK_BASE_PATH + url + CHUNK_SUFFIX)}`;
     if (map) {
         code += `\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,${btoa(// btoa doesn't handle nonlatin characters, so escape them as \x sequences
         // See https://stackoverflow.com/a/26603875

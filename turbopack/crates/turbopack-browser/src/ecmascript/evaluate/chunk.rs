@@ -25,7 +25,7 @@ use turbopack_ecmascript::{
     minify::minify,
     utils::StringifyJs,
 };
-use turbopack_ecmascript_runtime::RuntimeType;
+use turbopack_ecmascript_runtime::{BrowserRuntimeGlobals, RuntimeType};
 
 use crate::{
     BrowserChunkingContext,
@@ -80,11 +80,6 @@ impl EcmascriptBrowserEvaluateChunk {
         let this = self.await?;
         let environment = this.chunking_context.environment();
 
-        let output_root_to_root_path = this
-            .chunking_context
-            .output_root_to_root_path()
-            .owned()
-            .await?;
         let source_maps = *this
             .chunking_context
             .reference_chunk_source_maps(Vc::upcast(self))
@@ -170,12 +165,16 @@ impl EcmascriptBrowserEvaluateChunk {
         let runtime_type = *this.chunking_context.runtime_type().await?;
         match runtime_type {
             RuntimeType::Production | RuntimeType::Development => {
-                let runtime_code = turbopack_ecmascript_runtime::get_browser_runtime_code(
-                    environment,
+                let runtime_globals = BrowserRuntimeGlobals::new(
                     this.chunking_context.chunk_base_path(),
                     this.chunking_context.chunk_suffix(),
+                    this.chunking_context.output_root_to_root_path(),
+                    this.chunking_context.worker_forwarded_globals(),
+                );
+                let runtime_code = turbopack_ecmascript_runtime::get_browser_runtime_code(
+                    environment,
+                    runtime_globals,
                     runtime_type,
-                    output_root_to_root_path,
                     source_maps,
                 );
                 code.push_code(&*runtime_code.await?);

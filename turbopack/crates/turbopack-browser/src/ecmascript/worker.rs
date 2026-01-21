@@ -1,9 +1,11 @@
 use std::io::Write;
 
 use anyhow::Result;
+use indoc::writedoc;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ResolvedVc, ValueToString, Vc};
 use turbo_tasks_fs::{File, FileContent, FileSystemPath};
+use turbo_tasks_hash::hash_xxh3_hash64;
 use turbopack_core::{
     asset::{Asset, AssetContent},
     chunk::{ChunkingContext, MinifyType},
@@ -16,15 +18,11 @@ use turbopack_ecmascript::minify::minify;
 
 /// A pre-compiled worker entrypoint that bootstraps workers by reading config from URL params.
 ///
-/// The worker receives a JSON array via URL params where:
-/// - Index 0: Array of chunk URLs (-> TURBOPACK_NEXT_CHUNK_URLS, loaded via importScripts)
-/// - Index 1+: Values for forwarded globals (in order of `forwarded_globals`)
+/// The worker receives a JSON array via URL params of the following structure:
+/// `[TURBOPACK_NEXT_CHUNK_URLS, CHUNK_SUFFIX, ...WORKER_FORWARDED_GLOBALS]`
 #[turbo_tasks::value(shared)]
 pub struct EcmascriptBrowserWorkerEntrypoint {
     chunking_context: ResolvedVc<Box<dyn ChunkingContext>>,
-    /// Global variable names to forward from main thread to worker.
-    /// These are assigned to `self` in the worker scope before loading chunks.
-    /// Values are passed via URL params at indices 1+.
     forwarded_globals: ResolvedVc<Vec<RcStr>>,
 }
 
@@ -63,8 +61,11 @@ impl EcmascriptBrowserWorkerEntrypoint {
     #[turbo_tasks::function]
     async fn ident_for_path(&self) -> Result<Vc<AssetIdent>> {
         let chunk_root_path = self.chunking_context.chunk_root_path().owned().await?;
+        let forwarded_globals = self.forwarded_globals.await?;
+        let globals_hash = hash_xxh3_hash64(&*forwarded_globals);
         let ident = AssetIdent::from_path(chunk_root_path)
-            .with_modifier(rcstr!("turbopack worker entrypoint"));
+            .with_modifier(rcstr!("turbopack worker entrypoint"))
+            .with_modifier(format!("{globals_hash:08x}").into());
         Ok(ident)
     }
 
@@ -137,14 +138,11 @@ impl GenerateSourceMap for EcmascriptBrowserWorkerEntrypoint {
 
 /// Generates the worker bootstrap code as inline JavaScript.
 ///
-/// The worker receives a JSON array via URL params where:
-/// - Index 0: Array of chunk URLs (-> TURBOPACK_NEXT_CHUNK_URLS, loaded via importScripts)
-/// - Index 1+: Values for forwarded globals (in order of `forwarded_globals`)
+/// The worker receives a JSON array via URL params of the following structure:
+/// `[TURBOPACK_NEXT_CHUNK_URLS, CHUNK_SUFFIX, ...WORKER_FORWARDED_GLOBALS]`
 fn generate_worker_bootstrap_code(forwarded_globals: &[RcStr]) -> Result<Code> {
     let mut code: CodeBuilder = CodeBuilder::default();
 
-    // Generate the Object.assign properties for forwarded globals
-    // params[0] = chunk URLs, params[1] = TURBOPACK_CHUNK_SUFFIX, params[2+] = forwarded globals
     let mut global_assignments = vec![
         "TURBOPACK_NEXT_CHUNK_URLS: chunkUrls".to_string(),
         "TURBOPACK_CHUNK_SUFFIX: typeof params[1] === 'string' ? params[1] : ''".to_string(),
@@ -158,67 +156,68 @@ fn generate_worker_bootstrap_code(forwarded_globals: &[RcStr]) -> Result<Code> {
     }
     let globals_js = global_assignments.join(",\n    ");
 
-    write!(
+    // This code is slightly paranoid to avoid being useful as an XSS gadget.
+    //
+    // First, it verifies that it is running in a worker environment, which
+    // guarantees that the requestor shares the same origin as the script
+    // itself.
+    //
+    // Additionally, the code only allows loading scripts from the same origin,
+    // mitigating the risk that the worker could be exploited to fetch or run
+    // scripts from cross-origin sources.
+    //
+    // The snippet also validates types for all parameters to prevent unexpected
+    // usage.
+
+    writedoc!(
         code,
         r##"
-(function() {{
-  function abort(message) {{
-    console.error(message);
-    throw new Error(message);
-  }}
+        (function() {{
+        function abort(message) {{
+            console.error(message);
+            throw new Error(message);
+        }}
+        if (
+            typeof self["WorkerGlobalScope"] === "undefined" ||
+            !(self instanceof self["WorkerGlobalScope"])
+        ) {{
+            abort("Worker entrypoint must be loaded in a worker context");
+        }}
 
-  // Security: Ensure this code is running in a worker environment to prevent
-  // the worker entrypoint being used as an XSS gadget. If this is a worker, we
-  // know that the origin of the caller is the same as our origin.
-  if (
-    typeof self["WorkerGlobalScope"] === "undefined" ||
-    !(self instanceof self["WorkerGlobalScope"])
-  ) {{
-    abort("Worker entrypoint must be loaded in a worker context");
-  }}
+        // Try querystring first (SharedWorker), then hash (regular Worker)
+        var url = new URL(location.href);
+        var paramsString = url.searchParams.get("params");
+        if (!paramsString && url.hash.startsWith("#params=")) {{
+            paramsString = decodeURIComponent(url.hash.slice("#params=".length));
+        }}
 
-  var url = new URL(location.href);
+        if (!paramsString) abort("Missing worker bootstrap config");
 
-  // Try querystring first (SharedWorker), then hash (regular Worker)
-  var paramsString = url.searchParams.get("params");
-  if (!paramsString && url.hash.startsWith("#params=")) {{
-    paramsString = decodeURIComponent(url.hash.slice("#params=".length));
-  }}
+        var params = JSON.parse(paramsString);
+        var chunkUrls = Array.isArray(params[0]) ? params[0] : [];
 
-  if (!paramsString) abort("Missing worker bootstrap config");
+        Object.assign(self, {{
+            {0}
+        }});
 
-  var params = JSON.parse(paramsString);
+        if (chunkUrls.length > 0) {{
+            var scriptsToLoad = [];
+            for (var i = 0; i < chunkUrls.length; i++) {{
+                var chunk = chunkUrls[i];
+                // Chunks are relative to the origin.
+                var chunkUrl = new URL(chunk, location.origin);
+                if (chunkUrl.origin !== location.origin) {{
+                    abort("Refusing to load script from foreign origin: " + chunkUrl.origin);
+                }}
+                scriptsToLoad.push(chunkUrl.toString());
+            }}
 
-  // Validate and extract chunk URLs (params[0] must be an array)
-  var chunkUrls = Array.isArray(params[0]) ? params[0] : [];
-
-  // Set worker globals before loading chunks
-  Object.assign(self, {{
-    {0}
-  }});
-
-  // Load chunks via importScripts (in reverse order for correct execution)
-  if (chunkUrls.length > 0) {{
-    var scriptsToLoad = [];
-    for (var i = 0; i < chunkUrls.length; i++) {{
-      var chunk = chunkUrls[i];
-      // Chunks are relative to the origin.
-      var chunkUrl = new URL(chunk, location.origin);
-      // Security: Only load scripts from the same origin. This prevents this
-      // worker entrypoint from being used as a gadget to load scripts from
-      // foreign origins if someone happens to find a separate XSS vector
-      // elsewhere on this origin.
-      if (chunkUrl.origin !== location.origin) {{
-        abort("Refusing to load script from foreign origin: " + chunkUrl.origin);
-      }}
-      scriptsToLoad.push(chunkUrl.toString());
-    }}
-
-    chunkUrls.reverse();
-    importScripts.apply(self, scriptsToLoad);
-  }}
-}})();
-"##,
+            // As scripts are loaded, allow them to pop from the array
+            chunkUrls.reverse();
+            importScripts.apply(self, scriptsToLoad);
+        }}
+        }})();
+        "##,
         globals_js
     )?;
 

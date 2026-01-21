@@ -21,6 +21,7 @@ declare var TURBOPACK_NEXT_CHUNK_URLS: ChunkUrl[] | undefined
 // Injected by rust code
 declare var CHUNK_BASE_PATH: string
 declare var CHUNK_SUFFIX: string
+declare var WORKER_FORWARDED_GLOBALS: string[]
 
 interface TurbopackBrowserBaseContext<M> extends TurbopackBaseContext<M> {
   R: ResolvePathFromModule
@@ -318,9 +319,8 @@ browserContextPrototype.P = resolveAbsolutePath
  * The entrypoint is a pre-compiled worker runtime file. The params configure
  * which module chunks to load and which module to run as the entry point.
  *
- * The params are a JSON array where:
- * - Index 0: Array of chunk URLs to load via importScripts (-> TURBOPACK_NEXT_CHUNK_URLS)
- * - Index 1+: Values for forwarded globals (in order of `forwardedGlobals`)
+ * The params are a JSON array of the following structure:
+ * `[TURBOPACK_NEXT_CHUNK_URLS, CHUNK_SUFFIX, ...WORKER_FORWARDED_GLOBALS]`
  *
  * @param entrypoint URL path to the worker entrypoint chunk
  * @param moduleChunks list of module chunk paths to load
@@ -329,22 +329,17 @@ browserContextPrototype.P = resolveAbsolutePath
 function getWorkerURL(
   entrypoint: ChunkPath,
   moduleChunks: ChunkPath[],
-  shared: boolean,
-  forwardedGlobals: string[]
+  shared: boolean
 ): URL {
-  const url = new URL(getChunkRelativeUrl(entrypoint), location.origin)
-
   const chunkUrls = moduleChunks
     .map((chunk) => getChunkRelativeUrl(chunk))
     .reverse()
-  // params[0] = chunk URLs, params[1] = CHUNK_SUFFIX, params[2+] = forwarded globals
   const params: unknown[] = [chunkUrls, CHUNK_SUFFIX]
-
-  // Add forwarded global values in the same order as WORKER_FORWARDED_GLOBALS
-  for (const globalName of forwardedGlobals) {
+  for (const globalName of WORKER_FORWARDED_GLOBALS) {
     params.push((globalThis as Record<string, unknown>)[globalName])
   }
 
+  const url = new URL(getChunkRelativeUrl(entrypoint), location.origin)
   const paramsJson = JSON.stringify(params)
   if (shared) {
     url.searchParams.set('params', paramsJson)

@@ -11,6 +11,7 @@ const CHUNK_BASE_PATH = "";
 const RELATIVE_ROOT_PATH = "../../../../../../..";
 const RUNTIME_PUBLIC_PATH = "";
 const CHUNK_SUFFIX = "";
+const WORKER_FORWARDED_GLOBALS = [];
 /**
  * This file contains runtime types and functions that are shared between all
  * TurboPack ECMAScript runtimes.
@@ -1185,27 +1186,23 @@ browserContextPrototype.P = resolveAbsolutePath;
  * The entrypoint is a pre-compiled worker runtime file. The params configure
  * which module chunks to load and which module to run as the entry point.
  *
- * The params are a JSON array where:
- * - Index 0: Array of chunk URLs to load via importScripts (-> TURBOPACK_NEXT_CHUNK_URLS)
- * - Index 1+: Values for forwarded globals (in order of `forwardedGlobals`)
+ * The params are a JSON array of the following structure:
+ * `[TURBOPACK_NEXT_CHUNK_URLS, CHUNK_SUFFIX, ...WORKER_FORWARDED_GLOBALS]`
  *
  * @param entrypoint URL path to the worker entrypoint chunk
  * @param moduleChunks list of module chunk paths to load
  * @param shared whether this is a SharedWorker (uses querystring for URL identity)
- */ function getWorkerURL(entrypoint, moduleChunks, shared, forwardedGlobals) {
-    var url = new URL(getChunkRelativeUrl(entrypoint), location.origin);
+ */ function getWorkerURL(entrypoint, moduleChunks, shared) {
     var chunkUrls = moduleChunks.map(function(chunk) {
         return getChunkRelativeUrl(chunk);
     }).reverse();
-    // params[0] = chunk URLs, params[1] = CHUNK_SUFFIX, params[2+] = forwarded globals
     var params = [
         chunkUrls,
         CHUNK_SUFFIX
     ];
     var _iteratorNormalCompletion = true, _didIteratorError = false, _iteratorError = undefined;
     try {
-        // Add forwarded global values in the same order as WORKER_FORWARDED_GLOBALS
-        for(var _iterator = forwardedGlobals[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true){
+        for(var _iterator = WORKER_FORWARDED_GLOBALS[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true){
             var globalName = _step.value;
             params.push(globalThis[globalName]);
         }
@@ -1223,6 +1220,7 @@ browserContextPrototype.P = resolveAbsolutePath;
             }
         }
     }
+    var url = new URL(getChunkRelativeUrl(entrypoint), location.origin);
     var paramsJson = JSON.stringify(params);
     if (shared) {
         url.searchParams.set('params', paramsJson);

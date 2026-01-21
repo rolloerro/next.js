@@ -181,8 +181,7 @@ contextPrototype.u = loadWebAssemblyModule
 function getWorkerURL(
   _entrypoint: ChunkPath,
   _moduleChunks: ChunkPath[],
-  _shared: boolean,
-  _forwardedGlobals: string[]
+  _shared: boolean
 ): URL {
   throw new Error('Worker urls are not implemented yet for Node.js')
 }

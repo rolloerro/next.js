@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::{fmt::Display, io::Write};
 
 use anyhow::Result;
 use indoc::writedoc;
@@ -15,14 +15,74 @@ use crate::{
     ChunkSuffix, RuntimeType, asset_context::get_runtime_asset_context, embed_js::embed_static_code,
 };
 
+#[turbo_tasks::value]
+pub struct BrowserRuntimeGlobals {
+    chunk_base_path: ResolvedVc<Option<RcStr>>,
+    chunk_suffix: ResolvedVc<ChunkSuffix>,
+    output_root_to_root_path: ResolvedVc<RcStr>,
+    worker_forwarded_globals: ResolvedVc<Vec<RcStr>>,
+}
+
+#[turbo_tasks::value_impl]
+impl BrowserRuntimeGlobals {
+    #[turbo_tasks::function]
+    pub async fn new(
+        chunk_base_path: Vc<Option<RcStr>>,
+        chunk_suffix: Vc<ChunkSuffix>,
+        output_root_to_root_path: Vc<RcStr>,
+        worker_forwarded_globals: Vc<Vec<RcStr>>,
+    ) -> Result<Vc<Self>> {
+        Ok(BrowserRuntimeGlobals {
+            chunk_base_path: chunk_base_path.to_resolved().await?,
+            chunk_suffix: chunk_suffix.to_resolved().await?,
+            output_root_to_root_path: output_root_to_root_path.to_resolved().await?,
+            worker_forwarded_globals: worker_forwarded_globals.to_resolved().await?,
+        }
+        .cell())
+    }
+
+    #[turbo_tasks::function]
+    pub async fn code(&self, is_edge: bool) -> Result<Vc<Code>> {
+        let chunk_base_path = self.chunk_base_path.await?;
+        let chunk_base_path = chunk_base_path.as_ref().map_or("", |s| s.as_str());
+        let output_root_to_root_path = self.output_root_to_root_path.await?;
+        let worker_forwarded_globals = self.worker_forwarded_globals.await?;
+        let chunk_suffix = self.chunk_suffix.await?;
+
+        let chunk_suffix_str: &dyn Display = match &*chunk_suffix {
+            ChunkSuffix::None => &r#""""#,
+            ChunkSuffix::Constant(suffix) => &StringifyJs(suffix.as_str()),
+            ChunkSuffix::FromScriptSrc if is_edge => {
+                panic!("ChunkSuffix::FromScriptSrc is not supported in Edge runtimes");
+            }
+            ChunkSuffix::FromScriptSrc => &"getChunkSuffixFromScriptSrc()",
+        };
+        let mut code = CodeBuilder::default();
+        writedoc!(
+            code,
+            r#"
+            const CHUNK_BASE_PATH = {};
+            const RELATIVE_ROOT_PATH = {};
+            const RUNTIME_PUBLIC_PATH = {};
+            const CHUNK_SUFFIX = {};
+            const WORKER_FORWARDED_GLOBALS = {};
+            "#,
+            StringifyJs(chunk_base_path),
+            StringifyJs(output_root_to_root_path.as_str()),
+            StringifyJs(chunk_base_path),
+            chunk_suffix_str,
+            StringifyJs(&*worker_forwarded_globals),
+        )?;
+        Ok(Code::cell(code.build()))
+    }
+}
+
 /// Returns the code for the ECMAScript runtime.
 #[turbo_tasks::function]
 pub async fn get_browser_runtime_code(
     environment: ResolvedVc<Environment>,
-    chunk_base_path: Vc<Option<RcStr>>,
-    chunk_suffix: Vc<ChunkSuffix>,
+    runtime_globals: Vc<BrowserRuntimeGlobals>,
     runtime_type: RuntimeType,
-    output_root_to_root_path: RcStr,
     generate_source_map: bool,
 ) -> Result<Vc<Code>> {
     let asset_context = get_runtime_asset_context(*environment).resolve().await?;
@@ -79,11 +139,6 @@ pub async fn get_browser_runtime_code(
     };
 
     let mut code: CodeBuilder = CodeBuilder::default();
-    let relative_root_path = output_root_to_root_path;
-    let chunk_base_path = chunk_base_path.await?;
-    let chunk_base_path = chunk_base_path.as_ref().map_or_else(|| "", |f| f.as_str());
-    let chunk_suffix = chunk_suffix.await?;
-
     writedoc!(
         code,
         r#"
@@ -92,46 +147,14 @@ pub async fn get_browser_runtime_code(
                 return;
             }}
 
-            const CHUNK_BASE_PATH = {};
-            const RELATIVE_ROOT_PATH = {};
-            const RUNTIME_PUBLIC_PATH = {};
         "#,
-        StringifyJs(chunk_base_path),
-        StringifyJs(relative_root_path.as_str()),
-        StringifyJs(chunk_base_path),
     )?;
 
-    match &*chunk_suffix {
-        ChunkSuffix::None => {
-            writedoc!(
-                code,
-                r#"
-                    const CHUNK_SUFFIX = "";
-                "#
-            )?;
-        }
-        ChunkSuffix::Constant(suffix) => {
-            writedoc!(
-                code,
-                r#"
-                    const CHUNK_SUFFIX = {};
-                "#,
-                StringifyJs(suffix.as_str())
-            )?;
-        }
-        ChunkSuffix::FromScriptSrc => {
-            if chunk_loading == &ChunkLoading::Edge {
-                panic!("ChunkSuffix::FromScriptSrc is not supported in Edge runtimes");
-            }
-            writedoc!(
-                code,
-                r#"
-                    const CHUNK_SUFFIX = getChunkSuffixFromScriptSrc();
-                "#
-            )?;
-        }
-    }
-
+    code.push_code(
+        &*runtime_globals
+            .code(chunk_loading == &ChunkLoading::Edge)
+            .await?,
+    );
     code.push_code(&*shared_runtime_utils_code.await?);
     for runtime_code in runtime_base_code {
         code.push_code(
