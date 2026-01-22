@@ -312,10 +312,10 @@ export async function hydrate(
   let deploymentId = getDeploymentId()
   // setAppBuildId should be called only once, during JS initialization
   // and before any components have hydrated.
-  if (deploymentId) {
-    setAppBuildId(deploymentId)
-  } else {
+  if (initialRSCPayload.b) {
     setAppBuildId(initialRSCPayload.b!)
+  } else {
+    setAppBuildId(getDeploymentId()!)
   }
 
   const initialTimestamp = Date.now()

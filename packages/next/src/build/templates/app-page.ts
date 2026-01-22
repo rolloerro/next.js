@@ -726,6 +726,7 @@ export async function handler(
       }
 
       if (isDebugStaticShell || isDebugDynamicAccesses) {
+        // TODO remove this block, it's already done above when constructing the context
         context.renderOpts.nextExport = true
         context.renderOpts.supportsDynamicResponse = false
         context.renderOpts.isDebugDynamicAccesses = isDebugDynamicAccesses
