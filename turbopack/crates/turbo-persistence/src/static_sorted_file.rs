@@ -47,6 +47,14 @@ impl From<LookupValue> for SstLookupResult {
     }
 }
 
+/// The result of a lookup-key-by-hash-and-value operation.
+pub enum LookupKeyByHashAndValueResult {
+    /// The key was found and returned.
+    Found { key: ArcSlice<u8> },
+    /// No entry with the given hash and value was found.
+    NotFound,
+}
+
 #[derive(Clone, Default)]
 pub struct BlockWeighter;
 
@@ -162,6 +170,44 @@ impl StaticSortedFile {
         }
     }
 
+    /// Looks up a key by its hash, confirming the match by comparing the value.
+    ///
+    /// This is useful for reverse lookups where you have a secondary index mapping
+    /// values back to key hashes. Instead of comparing keys (which may be large),
+    /// this method finds entries with matching hash and confirms by comparing values.
+    ///
+    /// Returns the key bytes if an entry with matching hash and value is found.
+    pub fn lookup_key_by_hash_and_value(
+        &self,
+        key_hash: u64,
+        expected_value: &[u8],
+        key_block_cache: &BlockCache,
+        value_block_cache: &BlockCache,
+    ) -> Result<LookupKeyByHashAndValueResult> {
+        let mut current_block = self.meta.block_count - 1;
+        loop {
+            let block = self.get_key_block(current_block, key_block_cache)?;
+            let mut block = &block[..];
+            let block_type = block.read_u8()?;
+            match block_type {
+                BLOCK_TYPE_INDEX => {
+                    current_block = self.lookup_index_block(block, key_hash)?;
+                }
+                BLOCK_TYPE_KEY => {
+                    return self.lookup_key_block_by_value(
+                        block,
+                        key_hash,
+                        expected_value,
+                        value_block_cache,
+                    );
+                }
+                _ => {
+                    bail!("Invalid block type");
+                }
+            }
+        }
+    }
+
     /// Looks up a hash in a index block.
     fn lookup_index_block(&self, mut block: &[u8], hash: u64) -> Result<u16> {
         let first_block = block.read_u16::<BE>()?;
@@ -246,6 +292,118 @@ impl StaticSortedFile {
             }
         }
         Ok(SstLookupResult::NotFound)
+    }
+
+    /// Looks up entries by hash, comparing values to find a match, and returns the key.
+    ///
+    /// This searches for entries with the given hash, then compares their values against
+    /// `expected_value`. If a match is found, returns the key bytes. This is useful for
+    /// reverse lookups where you have value -> hash mapping and need to recover the key.
+    fn lookup_key_block_by_value(
+        &self,
+        mut block: &[u8],
+        key_hash: u64,
+        expected_value: &[u8],
+        value_block_cache: &BlockCache,
+    ) -> Result<LookupKeyByHashAndValueResult> {
+        let entry_count = block.read_u24::<BE>()? as usize;
+        let offsets = &block[..entry_count * 4];
+        let entries = &block[entry_count * 4..];
+
+        // Binary search to find an entry with matching hash
+        // Note: entries are sorted by (hash, key), so entries with same hash are contiguous
+        let mut l = 0;
+        let mut r = entry_count;
+        while l < r {
+            let m = (l + r) / 2;
+            let GetKeyEntryResult { hash: mid_hash, .. } =
+                get_key_entry(offsets, entries, entry_count, m)?;
+            match key_hash.cmp(&mid_hash) {
+                Ordering::Less => {
+                    r = m;
+                }
+                Ordering::Equal => {
+                    // Found an entry with matching hash, now scan all entries with this hash
+                    // First, find the start of entries with this hash
+                    let mut start = m;
+                    while start > 0 {
+                        let GetKeyEntryResult { hash, .. } =
+                            get_key_entry(offsets, entries, entry_count, start - 1)?;
+                        if hash != key_hash {
+                            break;
+                        }
+                        start -= 1;
+                    }
+
+                    // Scan all entries with matching hash, comparing values
+                    for i in start..entry_count {
+                        let GetKeyEntryResult {
+                            hash,
+                            key: entry_key,
+                            ty,
+                            val,
+                        } = get_key_entry(offsets, entries, entry_count, i)?;
+                        if hash != key_hash {
+                            // Past the entries with matching hash
+                            break;
+                        }
+
+                        // Load the actual value and compare
+                        if let Some(value_bytes) =
+                            self.get_value_bytes(ty, val, value_block_cache)?
+                        {
+                            if value_bytes.as_ref() == expected_value {
+                                // Found a match! Return the key bytes
+                                return Ok(LookupKeyByHashAndValueResult::Found {
+                                    key: ArcSlice::from(entry_key.to_vec().into_boxed_slice()),
+                                });
+                            }
+                        }
+                    }
+
+                    // No entry with matching value found
+                    return Ok(LookupKeyByHashAndValueResult::NotFound);
+                }
+                Ordering::Greater => {
+                    l = m + 1;
+                }
+            }
+        }
+        Ok(LookupKeyByHashAndValueResult::NotFound)
+    }
+
+    /// Gets the actual value bytes for an entry, returning None for deleted entries.
+    fn get_value_bytes(
+        &self,
+        ty: u8,
+        mut val: &[u8],
+        value_block_cache: &BlockCache,
+    ) -> Result<Option<ArcSlice<u8>>> {
+        Ok(match ty {
+            KEY_BLOCK_ENTRY_TYPE_SMALL => {
+                let block = val.read_u16::<BE>()?;
+                let size = val.read_u16::<BE>()? as usize;
+                let position = val.read_u32::<BE>()? as usize;
+                let value = self
+                    .get_value_block(block, value_block_cache)?
+                    .slice(position..position + size);
+                Some(value)
+            }
+            KEY_BLOCK_ENTRY_TYPE_MEDIUM => {
+                let block = val.read_u16::<BE>()?;
+                let value = self.read_value_block(block)?;
+                Some(value)
+            }
+            KEY_BLOCK_ENTRY_TYPE_BLOB => {
+                // Blob values are stored externally, we can't compare them directly here.
+                // For our use case (TaskCache values are small TaskIds), this shouldn't happen.
+                None
+            }
+            KEY_BLOCK_ENTRY_TYPE_DELETED => None,
+            _ => {
+                bail!("Invalid key block entry type");
+            }
+        })
     }
 
     /// Handles a key match by looking up the value.

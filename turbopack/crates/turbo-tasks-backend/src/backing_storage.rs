@@ -85,6 +85,23 @@ pub trait BackingStorageSealed: 'static + Send + Sync {
         storage: &mut TaskStorage,
     ) -> Result<()>;
 
+    /// Looks up the task type bytes for a given TaskId using the reverse index.
+    ///
+    /// This performs a two-phase lookup:
+    /// 1. Look up TaskIdToTaskTypeHash to get the key hash
+    /// 2. Look up TaskCache by hash, confirming by TaskId value, to get the key bytes
+    ///
+    /// Returns the raw task type bytes that can be decoded to CachedTaskType.
+    ///
+    /// # Safety
+    ///
+    /// `tx` must be a transaction from this BackingStorage instance.
+    unsafe fn lookup_task_type_by_task_id(
+        &self,
+        tx: Option<&Self::ReadTransaction<'_>>,
+        task_id: TaskId,
+    ) -> Result<Option<Vec<u8>>>;
+
     /// Batch lookup and decode data for multiple tasks directly into TypedStorage instances.
     /// Returns a vector of TypedStorage, one for each task_id in the input slice.
     /// # Safety
@@ -214,6 +231,23 @@ where
             Either::Right(this) => {
                 let tx = tx.map(|tx| read_transaction_right_or_panic(tx.as_ref()));
                 unsafe { this.batch_lookup_data(tx, task_ids, category) }
+            }
+        }
+    }
+
+    unsafe fn lookup_task_type_by_task_id(
+        &self,
+        tx: Option<&Self::ReadTransaction<'_>>,
+        task_id: TaskId,
+    ) -> Result<Option<Vec<u8>>> {
+        match self {
+            Either::Left(this) => {
+                let tx = tx.map(|tx| read_transaction_left_or_panic(tx.as_ref()));
+                unsafe { this.lookup_task_type_by_task_id(tx, task_id) }
+            }
+            Either::Right(this) => {
+                let tx = tx.map(|tx| read_transaction_right_or_panic(tx.as_ref()));
+                unsafe { this.lookup_task_type_by_task_id(tx, task_id) }
             }
         }
     }

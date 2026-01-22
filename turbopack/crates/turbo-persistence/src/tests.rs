@@ -1303,3 +1303,85 @@ fn batch_get_after_restore() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn lookup_key_by_hash_and_value() -> Result<()> {
+    use crate::key::hash_key;
+
+    let tempdir = tempfile::tempdir()?;
+    let path = tempdir.path();
+
+    // Create a database with known key->value mappings
+    // We'll use keys like [i] and values like [i + 100] for i in 0..100
+    {
+        let db = TurboPersistence::<_, 16>::open_with_parallel_scheduler(
+            path.to_path_buf(),
+            RayonParallelScheduler,
+        )?;
+
+        let batch = db.write_batch()?;
+        for i in 0..100u8 {
+            batch.put(0, vec![i], vec![i + 100].into())?;
+        }
+        db.commit_write_batch(batch)?;
+        db.shutdown()?;
+    }
+
+    // Reopen and test lookup_key_by_hash_and_value
+    {
+        let db = TurboPersistence::<_, 16>::open_with_parallel_scheduler(
+            path.to_path_buf(),
+            RayonParallelScheduler,
+        )?;
+
+        // Test: lookup key by providing hash and expected value
+        // For key [42], the value is [142]
+        let key = vec![42u8];
+        let expected_value = vec![142u8];
+        let key_hash = hash_key(&key.as_slice());
+
+        let result = db.lookup_key_by_hash_and_value(0, key_hash, &expected_value)?;
+        assert_eq!(result.as_deref(), Some(&key[..]), "Should find key [42]");
+
+        // Test: wrong value returns None
+        let wrong_value = vec![200u8];
+        let result = db.lookup_key_by_hash_and_value(0, key_hash, &wrong_value)?;
+        assert_eq!(result, None, "Wrong value should return None");
+
+        // Test: non-existent hash returns None
+        let result = db.lookup_key_by_hash_and_value(0, 0xDEADBEEF, &expected_value)?;
+        assert_eq!(result, None, "Non-existent hash should return None");
+
+        // Test: wrong family returns None
+        let result = db.lookup_key_by_hash_and_value(1, key_hash, &expected_value)?;
+        assert_eq!(result, None, "Wrong family should return None");
+
+        db.shutdown()?;
+    }
+
+    // Test after compaction
+    {
+        let db = TurboPersistence::<_, 16>::open_with_parallel_scheduler(
+            path.to_path_buf(),
+            RayonParallelScheduler,
+        )?;
+
+        db.full_compact()?;
+
+        // Verify lookup still works after compaction
+        let key = vec![50u8];
+        let expected_value = vec![150u8];
+        let key_hash = hash_key(&key.as_slice());
+
+        let result = db.lookup_key_by_hash_and_value(0, key_hash, &expected_value)?;
+        assert_eq!(
+            result.as_deref(),
+            Some(&key[..]),
+            "Should find key after compaction"
+        );
+
+        db.shutdown()?;
+    }
+
+    Ok(())
+}

@@ -377,14 +377,12 @@ where
                 );
             }
 
-            let mut task_type = None;
             let mut task = self.backend.storage.access_mut(task_id);
             if let Some(storage) = storage_for_data
                 && !task.flags.is_restored(TaskDataCategory::Data)
             {
                 task.restore_from(storage, TaskDataCategory::Data);
                 task.flags.set_restored(TaskDataCategory::Data);
-                task_type = task.get_persistent_task_type().cloned()
             }
             if let Some(storage) = storage_for_meta
                 && !task.flags.is_restored(TaskDataCategory::Meta)
@@ -392,13 +390,29 @@ where
                 task.restore_from(storage, TaskDataCategory::Meta);
                 task.flags.set_restored(TaskDataCategory::Meta);
             }
+            // Load task type from backing storage if not already present
+            // (persistent_task_type is transient and not restored from serialized data)
+            if task.get_persistent_task_type().is_none() && !task_id.is_transient() {
+                let tx = self.get_tx();
+                // Safety: `tx` is a valid transaction from `self.backend.backing_storage`.
+                if let Some(task_type_bytes) = unsafe {
+                    self.backend
+                        .backing_storage
+                        .lookup_task_type_by_task_id(tx, task_id)
+                        .expect("Failed to lookup task type")
+                } {
+                    let task_type: CachedTaskType =
+                        turbo_bincode::turbo_bincode_decode(&task_type_bytes)
+                            .expect("Failed to decode task type");
+                    let task_type = Arc::new(task_type);
+                    task.set_persistent_task_type(task_type.clone());
+                    // Insert into the task cache to avoid future lookups
+                    self.backend.task_cache.entry(task_type).or_insert(task_id);
+                }
+            }
             prepared_task_callback(self, task_id, category, task);
             #[cfg(debug_assertions)]
             self.active_task_locks.fetch_sub(1, Ordering::AcqRel);
-            if let Some(task_type) = task_type {
-                // Insert into the task cache to avoid future lookups
-                self.backend.task_cache.entry(task_type).or_insert(task_id);
-            }
         }
     }
 }
@@ -470,7 +484,7 @@ where
         TaskGuardImpl {
             task,
             task_id,
-            _backend: self.backend,
+            backend: self.backend,
             #[cfg(debug_assertions)]
             category,
             #[cfg(debug_assertions)]
@@ -500,7 +514,7 @@ where
             let guard: TaskGuardImpl<'_, B> = TaskGuardImpl {
                 task,
                 task_id,
-                _backend: backend,
+                backend,
                 #[cfg(debug_assertions)]
                 category: _category,
                 #[cfg(debug_assertions)]
@@ -585,7 +599,7 @@ where
             TaskGuardImpl {
                 task: task1,
                 task_id: task_id1,
-                _backend: self.backend,
+                backend: self.backend,
                 #[cfg(debug_assertions)]
                 category,
                 #[cfg(debug_assertions)]
@@ -594,7 +608,7 @@ where
             TaskGuardImpl {
                 task: task2,
                 task_id: task_id2,
-                _backend: self.backend,
+                backend: self.backend,
                 #[cfg(debug_assertions)]
                 category,
                 #[cfg(debug_assertions)]
@@ -928,7 +942,7 @@ pub trait TaskGuard: Debug + TaskStorageAccessors {
 pub struct TaskGuardImpl<'a, B: BackingStorage> {
     task_id: TaskId,
     task: StorageWriteGuard<'a>,
-    _backend: &'a TurboTasksBackendInner<B>,
+    backend: &'a TurboTasksBackendInner<B>,
     #[cfg(debug_assertions)]
     category: TaskDataCategory,
     #[cfg(debug_assertions)]

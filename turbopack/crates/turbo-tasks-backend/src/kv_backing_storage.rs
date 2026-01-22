@@ -10,6 +10,7 @@ use turbo_bincode::{
     TurboBincodeBuffer, new_turbo_bincode_decoder, new_turbo_bincode_encoder, turbo_bincode_decode,
     turbo_bincode_encode, turbo_bincode_encode_into,
 };
+use turbo_persistence::hash_key;
 use turbo_tasks::{
     TaskId,
     backend::CachedTaskType,
@@ -337,6 +338,22 @@ impl<T: KeyValueDatabase + Send + Sync + 'static> BackingStorageSealed
                                             "Unable to write task cache {task_type:?} => {task_id}"
                                         )
                                     })?;
+
+                                // Write reverse index: TaskId -> hash of task type
+                                let task_type_hash = hash_key(&task_type_bytes.as_slice());
+                                batch
+                                    .put(
+                                        KeySpace::TaskIdToTaskTypeHash,
+                                        WriteBuffer::Borrowed(&task_id.to_le_bytes()),
+                                        WriteBuffer::Borrowed(&task_type_hash.to_le_bytes()),
+                                    )
+                                    .with_context(|| {
+                                        format!(
+                                            "Unable to write task id to hash {task_id} => \
+                                             {task_type_hash}"
+                                        )
+                                    })?;
+
                                 max_task_id = max_task_id.max(task_id);
                             }
 
@@ -348,6 +365,10 @@ impl<T: KeyValueDatabase + Send + Sync + 'static> BackingStorageSealed
                     .unwrap_or(0);
                     next_task_id = next_task_id.max(max_task_id + 1);
                 }
+
+                // Flush the TaskIdToTaskTypeHash keyspace
+                // Safety: We already finished all processing of the task cache
+                unsafe { batch.flush(KeySpace::TaskIdToTaskTypeHash) }?;
 
                 save_infra::<T::SerialWriteBatch<'_>, T::ConcurrentWriteBatch<'_>>(
                     &mut WriteBatchRef::concurrent(batch),
@@ -411,8 +432,24 @@ impl<T: KeyValueDatabase + Send + Sync + 'static> BackingStorageSealed
                             .with_context(|| {
                                 format!("Unable to write task cache {task_type:?} => {task_id}")
                             })?;
+
+                        // Write reverse index: TaskId -> hash of task type
+                        let task_type_hash = hash_key(&task_type_bytes.as_slice());
+                        batch
+                            .put(
+                                KeySpace::TaskIdToTaskTypeHash,
+                                WriteBuffer::Borrowed(&task_id.to_le_bytes()),
+                                WriteBuffer::Borrowed(&task_type_hash.to_le_bytes()),
+                            )
+                            .with_context(|| {
+                                format!(
+                                    "Unable to write task id to hash {task_id} => {task_type_hash}"
+                                )
+                            })?;
+
                         next_task_id = next_task_id.max(task_id + 1);
                     }
+                    batch.flush(KeySpace::TaskIdToTaskTypeHash)?;
                 }
 
                 save_infra::<T::SerialWriteBatch<'_>, T::ConcurrentWriteBatch<'_>>(
@@ -538,6 +575,53 @@ impl<T: KeyValueDatabase + Send + Sync + 'static> BackingStorageSealed
 
     fn shutdown(&self) -> Result<()> {
         self.inner.database.shutdown()
+    }
+
+    unsafe fn lookup_task_type_by_task_id(
+        &self,
+        tx: Option<&T::ReadTransaction<'_>>,
+        task_id: TaskId,
+    ) -> Result<Option<Vec<u8>>> {
+        let inner = &*self.inner;
+
+        fn lookup<D: KeyValueDatabase>(
+            database: &D,
+            tx: &D::ReadTransaction<'_>,
+            task_id: TaskId,
+        ) -> Result<Option<Vec<u8>>> {
+            // Step 1: Look up TaskIdToTaskTypeHash to get the key hash
+            let task_id_bytes = (*task_id).to_le_bytes();
+            let Some(hash_bytes) =
+                database.get(tx, KeySpace::TaskIdToTaskTypeHash, &task_id_bytes)?
+            else {
+                return Ok(None);
+            };
+            let hash_bytes: [u8; 8] = hash_bytes.borrow().try_into()?;
+            let key_hash = u64::from_le_bytes(hash_bytes);
+
+            // Step 2: Look up TaskCache by hash, confirming by TaskId value
+            let Some(key_bytes) = database.lookup_key_by_hash_and_value(
+                tx,
+                KeySpace::TaskCache,
+                key_hash,
+                &task_id_bytes,
+            )?
+            else {
+                return Ok(None);
+            };
+
+            Ok(Some(key_bytes.borrow().to_vec()))
+        }
+
+        if inner.database.is_empty() {
+            return Ok(None);
+        }
+
+        inner
+            .with_tx(tx, |tx| lookup(&self.inner.database, tx, task_id))
+            .with_context(|| {
+                format!("Looking up task type for task id {task_id} from database failed")
+            })
     }
 }
 

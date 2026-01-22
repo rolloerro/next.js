@@ -1405,6 +1405,58 @@ impl<S: ParallelScheduler, const FAMILIES: usize> TurboPersistence<S, FAMILIES> 
         Ok(None)
     }
 
+    /// Looks up a key by its hash, confirming the match by comparing the value.
+    ///
+    /// This is useful for reverse lookups where you have a secondary index mapping
+    /// values (e.g., TaskIds) back to key hashes. Instead of comparing keys (which may
+    /// be large), this method finds entries with matching hash and confirms by comparing
+    /// values.
+    ///
+    /// Returns the key bytes if an entry with matching hash and value is found.
+    pub fn lookup_key_by_hash_and_value(
+        &self,
+        family: usize,
+        key_hash: u64,
+        expected_value: &[u8],
+    ) -> Result<Option<ArcSlice<u8>>> {
+        debug_assert!(family < FAMILIES, "Family index out of bounds");
+        let inner = self.inner.read();
+        for meta in inner.meta_files.iter().rev() {
+            match meta.lookup_key_by_hash_and_value(
+                family as u32,
+                key_hash,
+                expected_value,
+                &self.amqf_cache,
+                &self.key_block_cache,
+                &self.value_block_cache,
+            )? {
+                MetaLookupResult::FamilyMiss
+                | MetaLookupResult::RangeMiss
+                | MetaLookupResult::QuickFilterMiss => {
+                    // Continue searching other meta files
+                }
+                MetaLookupResult::SstLookup(result) => match result {
+                    SstLookupResult::Found(LookupValue::Slice { value }) => {
+                        // The "value" here is actually the key bytes we're looking for
+                        inner.accessed_key_hashes[family].insert(key_hash);
+                        return Ok(Some(value));
+                    }
+                    SstLookupResult::Found(LookupValue::Deleted) => {
+                        return Ok(None);
+                    }
+                    SstLookupResult::Found(LookupValue::Blob { .. }) => {
+                        // Key bytes shouldn't be stored as blob in practice
+                        return Ok(None);
+                    }
+                    SstLookupResult::NotFound => {
+                        // Continue searching other meta files
+                    }
+                },
+            }
+        }
+        Ok(None)
+    }
+
     pub fn batch_get<K: QueryKey>(
         &self,
         family: usize,

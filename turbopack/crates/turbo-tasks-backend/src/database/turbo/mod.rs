@@ -22,7 +22,7 @@ use crate::database::{
 mod parallel_scheduler;
 
 /// Number of key families, see KeySpace enum for their numbers.
-const FAMILIES: usize = 4;
+const FAMILIES: usize = 5;
 
 const MB: u64 = 1024 * 1024;
 const COMPACT_CONFIG: CompactConfig = CompactConfig {
@@ -91,6 +91,17 @@ impl KeyValueDatabase for TurboKeyValueDatabase {
         keys: &[&[u8]],
     ) -> Result<Vec<Option<Self::ValueBuffer<'l>>>> {
         self.db.batch_get(key_space as usize, keys)
+    }
+
+    fn lookup_key_by_hash_and_value<'l, 'db: 'l>(
+        &'l self,
+        _transaction: &'l Self::ReadTransaction<'db>,
+        key_space: KeySpace,
+        key_hash: u64,
+        expected_value: &[u8],
+    ) -> Result<Option<Self::ValueBuffer<'l>>> {
+        self.db
+            .lookup_key_by_hash_and_value(key_space as usize, key_hash, expected_value)
     }
 
     type ConcurrentWriteBatch<'l>

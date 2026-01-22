@@ -10,6 +10,7 @@ pub enum KeySpace {
     TaskMeta = 1,
     TaskData = 2,
     TaskCache = 3,
+    TaskIdToTaskTypeHash = 4,
 }
 
 pub trait KeyValueDatabase {
@@ -46,6 +47,26 @@ pub trait KeyValueDatabase {
             results.push(value);
         }
         Ok(results)
+    }
+
+    /// Looks up a key by its hash, confirming the match by comparing the value.
+    ///
+    /// This is useful for reverse lookups where you have a secondary index mapping
+    /// values (e.g., TaskIds) back to key hashes. Instead of comparing keys (which may
+    /// be large), this method finds entries with matching hash and confirms by comparing
+    /// values.
+    ///
+    /// Returns the key bytes if an entry with matching hash and value is found.
+    ///
+    /// Default implementation returns None (not supported).
+    fn lookup_key_by_hash_and_value<'l, 'db: 'l>(
+        &'l self,
+        _transaction: &'l Self::ReadTransaction<'db>,
+        _key_space: KeySpace,
+        _key_hash: u64,
+        _expected_value: &[u8],
+    ) -> Result<Option<Self::ValueBuffer<'l>>> {
+        Ok(None)
     }
 
     type SerialWriteBatch<'l>: SerialWriteBatch<'l>

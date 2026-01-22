@@ -5,6 +5,7 @@ pub struct ByKeySpace<T> {
     task_meta: T,
     task_data: T,
     task_cache: T,
+    task_id_to_task_type_hash: T,
 }
 
 impl<T> ByKeySpace<T> {
@@ -14,6 +15,7 @@ impl<T> ByKeySpace<T> {
             task_meta: factory(KeySpace::TaskMeta),
             task_data: factory(KeySpace::TaskData),
             task_cache: factory(KeySpace::TaskCache),
+            task_id_to_task_type_hash: factory(KeySpace::TaskIdToTaskTypeHash),
         }
     }
 
@@ -23,6 +25,7 @@ impl<T> ByKeySpace<T> {
             KeySpace::TaskMeta => &self.task_meta,
             KeySpace::TaskData => &self.task_data,
             KeySpace::TaskCache => &self.task_cache,
+            KeySpace::TaskIdToTaskTypeHash => &self.task_id_to_task_type_hash,
         }
     }
 
@@ -32,6 +35,7 @@ impl<T> ByKeySpace<T> {
             KeySpace::TaskMeta => &mut self.task_meta,
             KeySpace::TaskData => &mut self.task_data,
             KeySpace::TaskCache => &mut self.task_cache,
+            KeySpace::TaskIdToTaskTypeHash => &mut self.task_id_to_task_type_hash,
         }
     }
 
@@ -41,6 +45,10 @@ impl<T> ByKeySpace<T> {
             (KeySpace::TaskMeta, &self.task_meta),
             (KeySpace::TaskData, &self.task_data),
             (KeySpace::TaskCache, &self.task_cache),
+            (
+                KeySpace::TaskIdToTaskTypeHash,
+                &self.task_id_to_task_type_hash,
+            ),
         ]
         .into_iter()
     }
